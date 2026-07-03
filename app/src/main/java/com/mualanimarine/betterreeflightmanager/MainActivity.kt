@@ -194,7 +194,10 @@ private fun AppNavHost(navController: NavHostController) {
             )
         }
         composable(AppRoute.Control.name) {
-            ControlScreen(onBack = { navController.popBackStack() })
+            ControlScreen(
+                onBack = { navController.popBackStack() },
+                onOpenDeviceList = { navController.navigate(AppRoute.Network.name) }
+            )
         }
         composable(AppRoute.Airkiss.name) {
             AirkissScreen(onBack = { navController.popBackStack() })
@@ -292,7 +295,7 @@ private fun NetworkScreen(
     var connectingSsid by remember { mutableStateOf<String?>(null) }
     var pendingConnectSsid by remember { mutableStateOf<String?>(null) }
     var lanInfo by remember { mutableStateOf<LanNetworkInfo?>(null) }
-    var lanDeviceIps by remember { mutableStateOf<List<String>>(emptyList()) }
+    var lanDevices by remember { mutableStateOf<List<LanDiscoveredDevice>>(emptyList()) }
     var scanningLan by remember { mutableStateOf(false) }
 
     fun refreshDeviceHotspots() {
@@ -320,21 +323,32 @@ private fun NetworkScreen(
         lanInfo = currentLanInfo
         if (currentLanInfo == null) {
             status = "未读取到当前局域网信息，请确认已连接到家庭路由器。"
-            lanDeviceIps = emptyList()
+            lanDevices = emptyList()
             return
         }
         scanningLan = true
+        lanDevices = emptyList()
         status = "正在扫描同网段设备，请稍等..."
-        scanReachableDeviceIps(
+        scanReachableDevices(
             subnetPrefix = currentLanInfo.subnetPrefix,
             port = Constant.DEVICE_PORT,
-            onFinished = { ips ->
+            onDiscovered = { device ->
+                val cachedName = dataStore.getDeviceNameByIp(device.ip)
+                val cachedDevice = if (cachedName.isNullOrBlank()) device else device.copy(deviceName = cachedName)
+                if (lanDevices.none { it.ip == cachedDevice.ip }) {
+                    lanDevices = (lanDevices + cachedDevice).sortedBy { it.ip.ipToSortableValue() }
+                }
+            },
+            onFinished = { devices ->
                 scanningLan = false
-                lanDeviceIps = ips
-                status = if (ips.isEmpty()) {
+                lanDevices = devices.map { device ->
+                    val cachedName = dataStore.getDeviceNameByIp(device.ip)
+                    if (cachedName.isNullOrBlank()) device else device.copy(deviceName = cachedName)
+                }.sortedBy { it.ip.ipToSortableValue() }
+                status = if (devices.isEmpty()) {
                     "当前网段未发现可连接设备，请确认手机与设备在同一路由器下。"
                 } else {
-                    "已发现 ${ips.size} 个局域网设备，可直接带入设备 IP。"
+                    "已发现 ${devices.size} 个局域网设备，可直接带入设备 IP。"
                 }
             }
         )
@@ -442,28 +456,6 @@ private fun NetworkScreen(
         ) {
             HeroCard(title = "说明", body = status)
             OutlinedTextField(
-                value = ssid,
-                onValueChange = { ssid = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Wi-Fi SSID") }
-            )
-            OutlinedTextField(
-                value = password,
-                onValueChange = {
-                    if (!apMode) {
-                        password = it
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Wi-Fi 密码") },
-                enabled = !apMode,
-                supportingText = {
-                    if (apMode) {
-                        Text("AP 模式固定密码：$DEFAULT_DEVICE_AP_PASSWORD")
-                    }
-                }
-            )
-            OutlinedTextField(
                 value = address,
                 onValueChange = { address = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -558,15 +550,15 @@ private fun NetworkScreen(
                             secondaryLabel = if (scanningLan) "正在扫描设备" else "扫描同网段设备",
                             onSecondaryClick = { scanLanDevices() }
                         )
-                        lanDeviceIps.forEach { deviceIp ->
+                        lanDevices.forEach { device ->
                             CompactOutlinedButtonRow(
-                                primaryLabel = deviceIp,
+                                primaryLabel = device.displayLabel,
                                 onPrimaryClick = {
-                                    applyLanDeviceIpAndOpenControl(deviceIp)
+                                    applyLanDeviceIpAndOpenControl(device.ip)
                                 },
                                 secondaryLabel = "带入设备 IP",
                                 onSecondaryClick = {
-                                    applyLanDeviceIpAndOpenControl(deviceIp)
+                                    applyLanDeviceIpAndOpenControl(device.ip)
                                 }
                             )
                         }
@@ -945,7 +937,10 @@ private fun EsptouchScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ControlScreen(onBack: () -> Unit) {
+private fun ControlScreen(
+    onBack: () -> Unit,
+    onOpenDeviceList: () -> Unit
+) {
     val context = LocalContext.current
     val dataStore = BaseApplication.instance.dataStore
     var deviceIp by rememberSaveable { mutableStateOf(dataStore.getLastAddress()) }
@@ -1170,6 +1165,9 @@ private fun ControlScreen(onBack: () -> Unit) {
                             ?: deviceIp.takeIf { it.isNotBlank() }
                             ?: "设备方案"
                         currentDeviceName = deviceSchemeName
+                        snapshot.deviceName
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { dataStore.setDeviceNameByIp(deviceIp, it) }
                         val deviceItems = snapshot.schedule.map { it.toEditorItem() }
                         val deviceSchemeId = buildDeviceCurveGroupId(deviceSchemeName)
                         val existingSchemeIndex = curveGroups.indexOfFirst { it.id == deviceSchemeId }
@@ -1400,7 +1398,12 @@ private fun ControlScreen(onBack: () -> Unit) {
                     )
                 },
                 colors = transparentTopBarColors(),
-                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } }
+                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                actions = {
+                    TextButton(onClick = onOpenDeviceList) {
+                        Text("设备列表")
+                    }
+                }
             )
         }
     ) { innerPadding ->
@@ -3010,6 +3013,17 @@ private data class LanNetworkInfo(
     val subnetPrefix: String
 )
 
+private data class LanDiscoveredDevice(
+    val ip: String,
+    val deviceName: String? = null
+) {
+    val displayLabel: String
+        get() = when {
+            !deviceName.isNullOrBlank() -> "$ip · $deviceName"
+            else -> ip
+        }
+}
+
 private data class EsptouchDiagnostics(
     val ssid: String?,
     val bssid: String?,
@@ -4012,13 +4026,14 @@ private fun scanMatchingSsids(context: Context, prefix: String): List<DeviceHots
     }
 }
 
-private fun scanReachableDeviceIps(
+private fun scanReachableDevices(
     subnetPrefix: String,
     port: Int,
-    onFinished: (List<String>) -> Unit
+    onDiscovered: ((LanDiscoveredDevice) -> Unit)? = null,
+    onFinished: (List<LanDiscoveredDevice>) -> Unit
 ) {
     Thread {
-        val foundIps = mutableListOf<String>()
+        val foundDevices = mutableListOf<LanDiscoveredDevice>()
         val lock = Any()
         val executor = Executors.newFixedThreadPool(24)
         try {
@@ -4029,8 +4044,12 @@ private fun scanReachableDeviceIps(
                         Socket().use { socket ->
                             socket.connect(InetSocketAddress(candidateIp, port), 120)
                         }
+                        val device = LanDiscoveredDevice(ip = candidateIp)
                         synchronized(lock) {
-                            foundIps += candidateIp
+                            foundDevices += device
+                        }
+                        Handler(Looper.getMainLooper()).post {
+                            onDiscovered?.invoke(device)
                         }
                     }
                 }
@@ -4039,10 +4058,16 @@ private fun scanReachableDeviceIps(
             executor.shutdown()
             executor.awaitTermination(8, TimeUnit.SECONDS)
             Handler(Looper.getMainLooper()).post {
-                onFinished(foundIps.sorted())
+                onFinished(foundDevices.sortedWith(compareBy { it.ip.ipToSortableValue() }))
             }
         }
     }.start()
+}
+
+private fun String.ipToSortableValue(): Long {
+    return split('.')
+        .mapNotNull { it.toIntOrNull() }
+        .fold(0L) { acc, value -> (acc shl 8) + value }
 }
 
 private fun ScanResult.sanitizedSsid(): String? {

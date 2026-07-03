@@ -86,7 +86,7 @@
 
 ## 运行方式
 
-1. 用 Android Studio 打开 [D:\Dev\CodeX\NP](/D:/Dev/CodeX/NP)
+1. 用 Android Studio 打开
 2. 等 Gradle 同步完成
 3. 运行 `app` 模块
 4. 真机联调时优先使用 Android 设备
@@ -106,9 +106,9 @@
 
 ## 相关文档
 
-- [当前状态](/D:/Dev/CodeX/NP/docs/REBUILD_STATUS.md)
-- [协议说明](/D:/Dev/CodeX/NP/docs/PROTOCOL_SPEC.md)
-- [接手梳理](/D:/Dev/CodeX/NP/docs/TAKEOVER_AUDIT.md)
+- [当前状态](docs/REBUILD_STATUS.md)
+- [协议说明](docs/PROTOCOL_SPEC.md)
+- [接手梳理](docs/TAKEOVER_AUDIT.md)
 
 ## 开发建议
 

@@ -30,6 +30,16 @@ class SharedPreferencesUtil private constructor(context: Context) {
     fun setLastAddress(value: String?) = putString(KEY_LAST_ADDRESS, value)
     fun getLastAddress(): String = dataStore.getString(KEY_LAST_ADDRESS, "") ?: ""
 
+    fun setDeviceNameByIp(ip: String?, name: String?) {
+        if (ip.isNullOrBlank()) return
+        putString(deviceNameKey(ip), name)
+    }
+
+    fun getDeviceNameByIp(ip: String?): String? {
+        if (ip.isNullOrBlank()) return null
+        return dataStore.getString(deviceNameKey(ip), null)
+    }
+
     fun setCurveGroups(type: Int, value: String?) = putString(curveGroupsKey(type), value)
     fun getCurveGroups(type: Int): String? = dataStore.getString(curveGroupsKey(type), null)
 
@@ -53,6 +63,7 @@ class SharedPreferencesUtil private constructor(context: Context) {
 
         private fun curveGroupsKey(type: Int): String = "curve_groups_$type"
         private fun selectedCurveGroupKey(type: Int): String = "curve_selected_$type"
+        private fun deviceNameKey(ip: String): String = "device_name_${ip.replace('.', '_')}"
 
         @Volatile
         private var instance: SharedPreferencesUtil? = null
